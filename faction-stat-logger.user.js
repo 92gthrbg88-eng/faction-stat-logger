@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Faction Fight Stat Logger & Loadout Intel
 // @namespace    https://github.com
-// @version      1.3.5
-// @description  Logs combat estimates and defender equipment loadouts; keeps profile panels visible and falls back to Torn attack history when live logs are unavailable.
+// @version      1.3.6
+// @description  Logs combat estimates and defender equipment loadouts; robust Torn PDA/profile compatibility and profile panel persistence.
 // @author       92gthrbg88-eng
 // @match        https://www.torn.com/loader.php?sid=attack*
 // @match        https://www.torn.com/profiles.php*
 // @match        https://www.torn.com/factions.php*
+// @match        https://*.torn.com/loader.php?sid=attack*
+// @match        https://*.torn.com/profiles.php*
+// @match        https://*.torn.com/factions.php*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
@@ -15,7 +18,7 @@
 // @connect      faction-intel.thn25tvjtb.workers.dev
 // @updateURL    https://raw.githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
 // @downloadURL  https://raw.githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
-// @run-at       document-start
+// @run-at       document-end
 // ==/UserScript==
 
 (function () {
@@ -24,35 +27,18 @@
     const API_BASE = 'https://faction-intel.thn25tvjtb.workers.dev';
     const FACTION_TOKEN = 'HeartBreakers2026!SecretKey';
     const pageUrl = new URL(window.location.href);
-    const isAttackPage = pageUrl.searchParams.get('sid') === 'attack';
+    const isAttackPage = pageUrl.searchParams.get('sid') === 'attack' || /loader\.php\?sid=attack/i.test(pageUrl.href);
     const isProfilePage = /profiles\.php/i.test(pageUrl.href) || /profiles\.php/i.test(pageUrl.pathname);
     const isFactionPage = /factions\.php/i.test(pageUrl.href) || /factions\.php/i.test(pageUrl.pathname);
-    let apiKeyCache = null;
+    const isTornPda = !!(window.TornPDA || /TornPDA|PDA/i.test(navigator.userAgent || ''));
 
-    function getApiKey(forcePrompt = false) {
-        if (!forcePrompt && apiKeyCache) return apiKeyCache;
-
+    function getApiKey() {
         let key = String(GM_getValue('torn_api_key', '') || '').trim();
-        if (!key || forcePrompt) {
-            const promptText = 'Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):';
-            try {
-                key = String(prompt(promptText) || '').trim();
-            } catch (_) {
-                if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-                    key = String(window.prompt ? window.prompt(promptText) : '' || '').trim();
-                }
-            }
-            if (key) {
-                GM_setValue('torn_api_key', key);
-                apiKeyCache = key;
-            } else {
-                apiKeyCache = '';
-            }
-        } else {
-            apiKeyCache = key;
+        if (!key) {
+            key = String(prompt('Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):') || '').trim();
+            if (key) GM_setValue('torn_api_key', key);
         }
-
-        return apiKeyCache;
+        return key;
     }
 
     function formatNumber(value) {
@@ -80,7 +66,7 @@
         const style = document.createElement('style');
         style.id = 'fsl-styles';
         style.textContent = `
-            .fsl-panel{box-sizing:border-box;margin:10px 0;padding:12px;background:#222;border:1px solid #444;border-left:4px solid #4caf50;border-radius:5px;color:#eee;font:13px Arial,sans-serif}
+            .fsl-panel{box-sizing:border-box;margin:10px 0;padding:12px;background:#222;border:1px solid #444;border-left:4px solid #4caf50;border-radius:5px;color:#eee;font:13px Arial,sans-serif;position:relative;z-index:10}
             .fsl-panel h3{margin:0 0 8px;color:#a5d6a7;font-size:14px}
             .fsl-panel p{margin:4px 0;line-height:1.45}
             .fsl-panel .fsl-muted{color:#aaa;font-size:11px}
@@ -92,6 +78,67 @@
             }
         `;
         (document.head || document.documentElement).appendChild(style);
+    }
+
+    function findProfileHost() {
+        const selectors = [
+            '.profile-wrapper',
+            '.profile-container',
+            '.profile-content',
+            '.user-profile',
+            '.profile-page',
+            '#profile-content',
+            'main',
+            '#main',
+            '.pageWrap',
+            'body'
+        ];
+        for (const selector of selectors) {
+            const el = document.querySelector(selector);
+            if (el) return el;
+        }
+        return document.body || document.documentElement;
+    }
+
+    function ensureProfilePanels() {
+        const host = findProfileHost();
+        if (!host) return;
+
+        let statsPanel = document.getElementById('fsl-profile-card');
+        if (!statsPanel) {
+            statsPanel = document.createElement('section');
+            statsPanel.className = 'fsl-panel';
+            statsPanel.id = 'fsl-profile-card';
+            const statsTitle = document.createElement('h3');
+            statsTitle.textContent = 'Faction Intel';
+            const statsText = document.createElement('p');
+            statsText.textContent = 'No stat reports available yet.';
+            const statsNote = document.createElement('p');
+            statsNote.className = 'fsl-muted';
+            statsNote.textContent = 'Intel will appear here when the service has data.';
+            statsPanel.append(statsTitle, statsText, statsNote);
+            const insertBeforeNode = host.firstChild;
+            if (insertBeforeNode) host.insertBefore(statsPanel, insertBeforeNode);
+            else host.appendChild(statsPanel);
+        }
+
+        let gearPanel = document.getElementById('fsl-loadout-card');
+        if (!gearPanel) {
+            gearPanel = document.createElement('section');
+            gearPanel.className = 'fsl-panel fsl-loadout';
+            gearPanel.id = 'fsl-loadout-card';
+            const gearTitle = document.createElement('h3');
+            gearTitle.textContent = 'Faction Intel Loadout';
+            const gearText = document.createElement('p');
+            gearText.textContent = 'No loadout reports available yet.';
+            const gearNote = document.createElement('p');
+            gearNote.className = 'fsl-muted';
+            gearNote.textContent = 'Loadout data will appear here when available.';
+            gearPanel.append(gearTitle, gearText, gearNote);
+            const insertBeforeNode = host.firstChild;
+            if (insertBeforeNode) host.insertBefore(gearPanel, insertBeforeNode);
+            else host.appendChild(gearPanel);
+        }
     }
 
     function onDocumentReady(callback) {
@@ -113,6 +160,17 @@
 
     function parseJson(text) {
         try { return JSON.parse(text); } catch (_) { return null; }
+    }
+
+    function installProfileObserver() {
+        const root = document.body || document.documentElement;
+        if (!root) return;
+
+        const observer = new MutationObserver(() => {
+            ensureProfilePanels();
+        });
+
+        observer.observe(root, { childList: true, subtree: true });
     }
 
     function getBattleHistorySummary(playerId) {
@@ -162,159 +220,104 @@
         }).catch(() => null);
     }
 
-    function ensureProfilePanels() {
-        const host = document.querySelector('.profile-wrapper, .profile-container, .profile-content, .user-profile, .profile-page, main, #main, body') || document.body;
-        if (!host) return;
-
-        let statsPanel = document.getElementById('fsl-profile-card');
-        if (!statsPanel) {
-            statsPanel = document.createElement('section');
-            statsPanel.className = 'fsl-panel';
-            statsPanel.id = 'fsl-profile-card';
-            const statsTitle = document.createElement('h3');
-            statsTitle.textContent = 'Faction Intel';
-            const statsText = document.createElement('p');
-            statsText.textContent = 'No stat reports available yet.';
-            const statsNote = document.createElement('p');
-            statsNote.className = 'fsl-muted';
-            statsNote.textContent = 'Intel will appear here when the service has data.';
-            statsPanel.append(statsTitle, statsText, statsNote);
-            const insertBeforeNode = host.firstChild;
-            if (insertBeforeNode) host.insertBefore(statsPanel, insertBeforeNode);
-            else host.appendChild(statsPanel);
-        }
-
-        let gearPanel = document.getElementById('fsl-loadout-card');
-        if (!gearPanel) {
-            gearPanel = document.createElement('section');
-            gearPanel.className = 'fsl-panel fsl-loadout';
-            gearPanel.id = 'fsl-loadout-card';
-            const gearTitle = document.createElement('h3');
-            gearTitle.textContent = 'Faction Intel Loadout';
-            const gearText = document.createElement('p');
-            gearText.textContent = 'No loadout reports available yet.';
-            const gearNote = document.createElement('p');
-            gearNote.className = 'fsl-muted';
-            gearNote.textContent = 'Loadout data will appear here when available.';
-            gearPanel.append(gearTitle, gearText, gearNote);
-            const insertBeforeNode = host.firstChild;
-            if (insertBeforeNode) host.insertBefore(gearPanel, insertBeforeNode);
-            else host.appendChild(gearPanel);
-        }
-    }
-
     if (isProfilePage) {
-        function loadProfileIntel() {
+        onDocumentReady(() => {
             addStyles();
             ensureProfilePanels();
+            installProfileObserver();
 
-            const targetId = pageUrl.searchParams.get('XID') || new URLSearchParams(window.location.search).get('XID');
-            const statsPanel = document.getElementById('fsl-profile-card');
-            const gearPanel = document.getElementById('fsl-loadout-card');
-            if (!statsPanel || !gearPanel) {
-                ensureProfilePanels();
-                return;
-            }
+            const samePageRunner = () => {
+                const targetId = new URLSearchParams(window.location.search).get('XID');
+                const statsPanel = document.getElementById('fsl-profile-card');
+                const gearPanel = document.getElementById('fsl-loadout-card');
+                if (!statsPanel || !gearPanel) {
+                    ensureProfilePanels();
+                    return;
+                }
 
-            const statsText = statsPanel.querySelector('p');
-            const statsNote = statsPanel.querySelector('.fsl-muted');
-            const gearText = gearPanel.querySelectorAll('p')[1];
-            const gearNote = gearPanel.querySelectorAll('.fsl-muted')[0];
+                const statsText = statsPanel.querySelector('p');
+                const statsNote = statsPanel.querySelector('.fsl-muted');
+                const gearText = gearPanel.querySelectorAll('p')[1];
+                const gearNote = gearPanel.querySelectorAll('.fsl-muted')[0];
 
-            if (!statsText || !statsNote || !gearText || !gearNote) return;
+                if (!statsText || !statsNote || !gearText || !gearNote) return;
 
-            const apiKey = getApiKey();
-            if (!apiKey) {
-                statsText.textContent = 'API key required for Torn battle-history fallback.';
-                statsNote.textContent = 'Enter the key when prompted to enable profile intel.';
-                gearText.textContent = 'No key entered yet.';
-                gearNote.textContent = 'The script will ask once on the next load.';
-                try {
-                    getApiKey(true);
-                } catch (_) {}
-                return;
-            }
+                if (!targetId) {
+                    statsNote.textContent = 'Could not determine this profile’s player ID.';
+                    return;
+                }
 
-            if (!targetId) {
-                statsNote.textContent = 'Could not determine this profile’s player ID.';
-                return;
-            }
-
-            const query = new URLSearchParams({ id: targetId });
-            backendRequest({
-                method: 'GET',
-                url: `${API_BASE}/stats?${query}`,
-                onload: async response => {
-                    if (response.status < 200 || response.status >= 300) {
-                        statsNote.textContent = `Intel service unavailable (HTTP ${response.status}); panels remain visible.`;
-                        const fallback = await getBattleHistorySummary(targetId);
-                        if (fallback) {
-                            statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
-                            statsNote.textContent = 'No current logs available — using recent Torn attack history.';
-                            gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
-                            gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
+                const query = new URLSearchParams({ id: targetId });
+                backendRequest({
+                    method: 'GET',
+                    url: `${API_BASE}/stats?${query}`,
+                    onload: async response => {
+                        if (response.status < 200 || response.status >= 300) {
+                            statsNote.textContent = `Intel service unavailable (HTTP ${response.status}); panels remain visible.`;
+                            const fallback = await getBattleHistorySummary(targetId);
+                            if (fallback) {
+                                statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
+                                statsNote.textContent = 'No current logs available — using recent Torn attack history.';
+                                gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
+                                gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
+                            }
+                            return;
                         }
-                        return;
-                    }
 
-                    const data = parseJson(response.responseText);
-                    if (!data) {
-                        statsNote.textContent = 'Intel service returned an unreadable response; panels remain visible.';
-                        const fallback = await getBattleHistorySummary(targetId);
-                        if (fallback) {
-                            statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
-                            statsNote.textContent = 'No current logs available — using recent Torn attack history.';
-                            gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
-                            gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
+                        const data = parseJson(response.responseText);
+                        if (!data) {
+                            statsNote.textContent = 'Intel service returned an unreadable response; panels remain visible.';
+                            const fallback = await getBattleHistorySummary(targetId);
+                            if (fallback) {
+                                statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
+                                statsNote.textContent = 'No current logs available — using recent Torn attack history.';
+                                gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
+                                gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
+                            }
+                            return;
                         }
-                        return;
-                    }
 
-                    const hasLiveStats = !!(data && (Number(data.bss) || Number(data.str) || Number(data.def) || Number(data.spd) || Number(data.dex) || Number(data.samples)));
-                    if (!hasLiveStats) {
+                        const hasLiveStats = !!(Number(data.bss) || Number(data.str) || Number(data.def) || Number(data.spd) || Number(data.dex) || Number(data.samples));
+                        if (!hasLiveStats) {
+                            const fallback = await getBattleHistorySummary(targetId);
+                            if (fallback) {
+                                statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
+                                statsNote.textContent = 'No current logs available — using recent Torn attack history.';
+                                gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
+                                gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
+                                return;
+                            }
+                        }
+
+                        const updated = data.updatedAt ? new Date(data.updatedAt * 1000).toLocaleDateString() : 'unknown';
+                        statsText.textContent = `Build: ${archetype(data)} · BSS: ${formatNumber(data.bss)} · STR: ${formatNumber(data.str)} · DEF: ${formatNumber(data.def)} · SPD: ${formatNumber(data.spd)} · DEX: ${formatNumber(data.dex)}`;
+                        statsNote.textContent = `Reports: ${formatNumber(data.samples || 0)} · Last updated: ${updated}`;
+
+                        const loadout = data.loadout || {};
+                        const armor = Array.isArray(loadout.armor) && loadout.armor.length ? loadout.armor.join(', ') : 'Unknown';
+                        gearText.textContent = `Primary: ${loadout.primary || 'Unknown'} · Secondary: ${loadout.secondary || 'Unknown'} · Melee: ${loadout.melee || 'Unknown'} · Temporary: ${loadout.temporary || 'Unknown'} · Armor: ${armor}`;
+                        gearNote.textContent = data.updatedAt ? `Last seen: ${updated}` : 'No dated loadout report available.';
+                    },
+                    onerror: async () => {
                         const fallback = await getBattleHistorySummary(targetId);
                         if (fallback) {
                             statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
-                            statsNote.textContent = 'No current logs available — using recent Torn attack history.';
+                            statsNote.textContent = 'Could not connect to intel service — using recent Torn attack history.';
                             gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
                             gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
                             return;
                         }
+                        statsNote.textContent = 'Could not connect to intel service; panels remain visible.';
                     }
+                });
+            };
 
-                    const updated = data.updatedAt ? new Date(data.updatedAt * 1000).toLocaleDateString() : 'unknown';
-                    statsText.textContent = `Build: ${archetype(data)} · BSS: ${formatNumber(data.bss)} · STR: ${formatNumber(data.str)} · DEF: ${formatNumber(data.def)} · SPD: ${formatNumber(data.spd)} · DEX: ${formatNumber(data.dex)}`;
-                    statsNote.textContent = `Reports: ${formatNumber(data.samples || 0)} · Last updated: ${updated}`;
-
-                    const loadout = data.loadout || {};
-                    const armor = Array.isArray(loadout.armor) && loadout.armor.length ? loadout.armor.join(', ') : 'Unknown';
-                    gearText.textContent = `Primary: ${loadout.primary || 'Unknown'} · Secondary: ${loadout.secondary || 'Unknown'} · Melee: ${loadout.melee || 'Unknown'} · Temporary: ${loadout.temporary || 'Unknown'} · Armor: ${armor}`;
-                    gearNote.textContent = data.updatedAt ? `Last seen: ${updated}` : 'No dated loadout report available.';
-                },
-                onerror: async () => {
-                    const fallback = await getBattleHistorySummary(targetId);
-                    if (fallback) {
-                        statsText.textContent = `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`;
-                        statsNote.textContent = 'Could not connect to intel service — using recent Torn attack history.';
-                        gearText.textContent = `Last result: ${fallback.latestResult || 'No recent result captured.'}`;
-                        gearNote.textContent = fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.';
-                        return;
-                    }
-                    statsNote.textContent = 'Could not connect to intel service; panels remain visible.';
-                }
-            });
-        }
-
-        onDocumentReady(() => {
-            loadProfileIntel();
-            const observer = new MutationObserver(() => {
-                ensureProfilePanels();
-                loadProfileIntel();
-            });
-            observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
-            setInterval(() => {
-                ensureProfilePanels();
-            }, 2000);
+            samePageRunner();
+            window.addEventListener('hashchange', samePageRunner, { passive: true });
+            window.addEventListener('popstate', samePageRunner, { passive: true });
+            if (isTornPda) {
+                setInterval(samePageRunner, 2000);
+            }
         });
     }
 
@@ -383,6 +386,7 @@
         onDocumentReady(() => {
             addStyles();
             scanRoster();
+            installProfileObserver();
             const observer = new MutationObserver(() => {
                 clearTimeout(timer);
                 timer = setTimeout(scanRoster, 300);
@@ -536,7 +540,9 @@
                 if (requestUrl.includes('sid=attackData')) {
                     response.clone().json().then(parseAttackPayload).catch(() => {});
                 }
-            } catch (_) { /* Do not interfere with Torn's request. */ }
+            } catch (_) {
+                // Do not interfere with Torn's request.
+            }
             return response;
         };
     }
