@@ -13,8 +13,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      api.torn.com
 // @connect      faction-intel.thn25tvjtb.workers.dev
-// @updateURL    https://githubusercontent.com/92gthrbg88-eng/faction-stat-logger.user.js/main/faction-stat-logger.user.js
-// @downloadURL  https://githubusercontent.com/92gthrbg88-eng/faction-stat-logger.user.js/main/faction-stat-logger.user.js
+// @updateURL    https://githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
+// @downloadURL  https://githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
 // @run-at       document-start
 // ==/UserScript==
 
