@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faction Fight Stat Logger & Loadout Intel
 // @namespace    https://github.com
-// @version      1.3.0
+// @version      1.3.1
 // @description  Passively logs 4-stat combat estimates and defender equipment loadouts from fights, displaying them on Player Profiles and Faction War screens without interfering with FFScouter or CA[...]
 // @author       92gthrbg88-eng
 // @match        https://www.torn.com/loader.php?sid=attack*
@@ -13,8 +13,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      api.torn.com
 // @connect      faction-intel.thn25tvjtb.workers.dev
-// @updateURL    https://githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
-// @downloadURL  https://githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
+// @updateURL    https://raw.githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
+// @downloadURL  https://raw.githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -37,15 +37,14 @@
         try {
             GM_setValue(key, value);
         } catch (_) {
-            // Ignore storage failures silently; they are not fatal for the script.
+            // Ignore storage failures.
         }
     }
 
     function getApiKey() {
-        let key = getStorageValue('torn_api_key', '').trim();
+        let key = String(getStorageValue('torn_api_key', '')).trim();
         if (!key) {
-            key = prompt('Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):') || '';
-            key = key.trim();
+            key = (prompt('Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):') || '').trim();
             if (key) {
                 setStorageValue('torn_api_key', key);
             }
@@ -54,7 +53,7 @@
     }
 
     function getFactionSecretToken() {
-        return getStorageValue('fsl_faction_secret', DEFAULT_SECRET_TOKEN);
+        return String(getStorageValue('fsl_faction_secret', DEFAULT_SECRET_TOKEN));
     }
 
     function formatCompactNumber(num) {
@@ -115,9 +114,7 @@
                 align-items: center;
                 gap: 8px;
             }
-            .fsl-card strong {
-                color: #8bc34a;
-            }
+            .fsl-card strong { color: #8bc34a; }
             .fsl-badge {
                 margin-left: 6px;
                 padding: 2px 6px;
@@ -143,9 +140,7 @@
                 justify-content: space-between;
                 align-items: center;
             }
-            .fsl-loadout-box-header strong {
-                color: #ffb74d;
-            }
+            .fsl-loadout-box-header strong { color: #ffb74d; }
             .fsl-loadout-box-body {
                 padding: 8px 12px;
                 line-height: 1.5;
@@ -173,8 +168,7 @@
         const current = getStorageValue('torn_api_key', '');
         const input = prompt('Enter your Torn Limited Access API Key (stored locally in your browser only):', current);
         if (input !== null) {
-            const value = input.trim();
-            setStorageValue('torn_api_key', value);
+            setStorageValue('torn_api_key', String(input).trim());
             alert('API key saved locally.');
         }
     });
@@ -221,7 +215,6 @@
 
         function parseAttackResponse(payload) {
             if (!payload || !payload.DB || fightState.submitted) return;
-
             const db = payload.DB;
 
             if (db.defenderUser) {
@@ -324,8 +317,6 @@
 
         async function finalizeAndUpload() {
             try {
-                if (fightState.submitted && fightState.fairFight === null) return;
-
                 const apiKey = getApiKey();
                 if (!apiKey || !fightState.opponentId) return;
 
@@ -389,7 +380,7 @@
                     response.clone().json().then(parseAttackResponse).catch(() => {});
                 }
             } catch (_) {
-                // Ignore parsing errors from the fetched payload.
+                // ignore parse errors
             }
             return response;
         };
@@ -418,7 +409,9 @@
                     <div>BSS: ${formatCompactNumber(stats.bss)} • Updated: ${updatedDate}</div>
                 `;
 
-                profileWrapper.parentNode.insertBefore(card, profileWrapper);
+                if (profileWrapper.parentNode) {
+                    profileWrapper.parentNode.insertBefore(card, profileWrapper);
+                }
             });
 
             observer.observe(document.body, { childList: true, subtree: true });
@@ -481,17 +474,15 @@
                     if (payload.loadout) {
                         injectLoadoutBadgeBelowMedals(payload);
                     }
-                },
-                onerror: () => {}
+                }
             });
         }
 
         function runProfilePage() {
             const match = PAGE_URL.match(/XID=(\d+)/i);
             if (!match) return;
-            const targetId = match[1];
             injectStyles();
-            fetchProfileStats(targetId);
+            fetchProfileStats(match[1]);
         }
 
         if (document.readyState === 'loading') {
@@ -502,8 +493,6 @@
     }
 
     if (PAGE_URL.includes('factions.php')) {
-        injectStyles();
-
         const fetchedIds = new Set();
         let batchTimer = null;
 
@@ -547,8 +536,7 @@
                     const payload = safeJsonParse(res.responseText);
                     if (!payload) return;
                     renderWarBadges(payload);
-                },
-                onerror: () => {}
+                }
             });
         }
 
@@ -585,6 +573,7 @@
         }
 
         function runFactionPage() {
+            injectStyles();
             const observer = new MutationObserver(() => {
                 clearTimeout(batchTimer);
                 batchTimer = setTimeout(scanWarAndRosterRows, 350);
