@@ -1,0 +1,1 @@
+# faction-stat-logger.user.js
