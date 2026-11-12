@@ -1,24 +1,17 @@
 // ==UserScript==
-// @name         Faction Fight Stat Logger & Loadout Intel
-// @namespace    https://github.com
-// @version      1.3.7
-// @description  Robust Torn profile UI that stays visible on Torn PDA/profile pages, with backend fallback when live logs are unavailable.
+// @name         Faction Stat Logger
+// @namespace    https://github.com/92gthrbg88-eng/faction-stat-logger
+// @version      1.4.0
+// @description  Torn profile UI that stays visible, never prompts for a key, and falls back to battle history when server stats are missing.
 // @author       92gthrbg88-eng
-// @match        https://www.torn.com/loader.php?sid=attack*
-// @match        https://www.torn.com/profiles.php*
-// @match        https://www.torn.com/factions.php*
-// @match        https://*.torn.com/loader.php?sid=attack*
-// @match        https://*.torn.com/profiles.php*
-// @match        https://*.torn.com/factions.php*
+// @match        https://*.torn.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
 // @connect      api.torn.com
 // @connect      faction-intel.thn25tvjtb.workers.dev
-// @updateURL    https://raw.githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
-// @downloadURL  https://raw.githubusercontent.com/92gthrbg88-eng/faction-stat-logger/main/faction-stat-logger.user.js
-// @run-at       document-start
+// @run-at       document-idle
 // ==/UserScript==
 
 (function () {
@@ -26,22 +19,58 @@
 
     const API_BASE = 'https://faction-intel.thn25tvjtb.workers.dev';
     const FACTION_TOKEN = 'HeartBreakers2026!SecretKey';
-    const pageUrl = new URL(window.location.href);
-    const isAttackPage = /loader\.php\?sid=attack/i.test(pageUrl.href) || pageUrl.searchParams.get('sid') === 'attack';
-    const isProfilePage = /profiles\.php/i.test(pageUrl.href) || /profiles\.php/i.test(pageUrl.pathname);
-    const isFactionPage = /factions\.php/i.test(pageUrl.href) || /factions\.php/i.test(pageUrl.pathname);
+    const STORAGE_KEY = 'fsl_torn_api_key';
+
+    function safeGetStorage() {
+        try {
+            return window.localStorage || null;
+        } catch (_) {
+            return null;
+        }
+    }
 
     function getApiKey() {
-        let key = String(GM_getValue('torn_api_key', '') || '').trim();
-        if (!key) {
-            try {
-                key = String(prompt('Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):') || '').trim();
-            } catch (_) {
-                key = '';
+        const candidates = [];
+        try {
+            if (typeof GM_getValue === 'function') {
+                candidates.push(String(GM_getValue(STORAGE_KEY, '') || ''));
             }
-            if (key) GM_setValue('torn_api_key', key);
+        } catch (_) {}
+
+        try {
+            if (window && window.__FSL_API_KEY__) {
+                candidates.push(String(window.__FSL_API_KEY__ || ''));
+            }
+        } catch (_) {}
+
+        const storage = safeGetStorage();
+        if (storage) {
+            candidates.push(String(storage.getItem(STORAGE_KEY) || ''));
         }
-        return key;
+
+        for (const candidate of candidates) {
+            const value = String(candidate || '').trim();
+            if (value) return value;
+        }
+
+        return '';
+    }
+
+    function setApiKey(value) {
+        const clean = String(value || '').trim();
+        try {
+            if (typeof GM_setValue === 'function') {
+                GM_setValue(STORAGE_KEY, clean);
+            }
+        } catch (_) {}
+
+        const storage = safeGetStorage();
+        if (storage) {
+            try {
+                if (clean) storage.setItem(STORAGE_KEY, clean);
+                else storage.removeItem(STORAGE_KEY);
+            } catch (_) {}
+        }
     }
 
     function formatNumber(value) {
@@ -54,18 +83,20 @@
     }
 
     function archetype(stats = {}) {
-        const candidates = [
+        const entries = [
             ['Str Build', Number(stats.str) || 0],
             ['Def Tank', Number(stats.def) || 0],
             ['Spd Build', Number(stats.spd) || 0],
             ['Dex Build', Number(stats.dex) || 0]
         ].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
-        if (candidates.length < 2) return 'Partial Intel';
-        return candidates[0][1] >= candidates[1][1] * 1.6 ? candidates[0][0] : 'Balanced';
+
+        if (entries.length < 2) return 'Partial Intel';
+        return entries[0][1] >= entries[1][1] * 1.6 ? entries[0][0] : 'Balanced';
     }
 
     function addStyles() {
         if (document.getElementById('fsl-styles')) return;
+
         const style = document.createElement('style');
         style.id = 'fsl-styles';
         style.textContent = `
@@ -73,42 +104,61 @@
                 position: fixed;
                 top: 80px;
                 right: 12px;
-                width: min(320px, calc(100vw - 24px));
+                width: min(330px, calc(100vw - 24px));
                 max-height: 55vh;
                 overflow: auto;
                 z-index: 2147483647;
-                background: rgba(18, 18, 18, 0.96);
-                color: #f1f1f1;
-                border: 1px solid #4caf50;
+                background: rgba(14, 16, 18, 0.96);
+                color: #f5f5f5;
+                border: 1px solid #5aae6c;
                 border-radius: 8px;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+                box-shadow: 0 8px 28px rgba(0,0,0,0.45);
                 font-family: Arial, sans-serif;
                 padding: 10px 12px;
                 box-sizing: border-box;
             }
+
             #fsl-profile-panel h3 {
                 margin: 0 0 8px;
-                color: #a5d6a7;
+                color: #b8efbd;
                 font-size: 14px;
+                font-weight: 700;
             }
+
             #fsl-profile-panel p {
                 margin: 6px 0;
-                line-height: 1.4;
                 font-size: 12px;
+                line-height: 1.4;
             }
+
             #fsl-profile-panel .fsl-muted {
-                color: #aaa;
+                color: #c8c8c8;
                 font-size: 11px;
             }
+
             #fsl-profile-panel .fsl-section {
-                background: rgba(255,255,255,0.02);
+                background: rgba(255,255,255,0.03);
                 border: 1px solid rgba(255,255,255,0.08);
                 border-radius: 6px;
                 padding: 8px 10px;
                 margin-bottom: 8px;
             }
+
+            .fsl-roster-badge {
+                display: inline-block;
+                margin-left: 8px;
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: rgba(74, 174, 117, 0.2);
+                color: #dff7e4;
+                font-size: 10px;
+                line-height: 1.4;
+                vertical-align: middle;
+            }
         `;
-        (document.head || document.documentElement).appendChild(style);
+
+        const parent = document.head || document.documentElement;
+        if (parent) parent.appendChild(style);
     }
 
     function ensureProfilePanel() {
@@ -152,39 +202,40 @@
         if (loadoutNoteNode) loadoutNoteNode.textContent = loadoutNote;
     }
 
-    function onDocumentReady(callback) {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', callback, { once: true });
-        } else {
-            callback();
+    function parseJson(text) {
+        try {
+            return JSON.parse(text);
+        } catch (_) {
+            return null;
         }
     }
 
-    function backendRequest(options) {
+    function requestBackend(options) {
+        if (typeof GM_xmlhttpRequest !== 'function') {
+            if (options.onerror) options.onerror(new Error('GM_xmlhttpRequest unavailable'));
+            return;
+        }
+
         GM_xmlhttpRequest({
             ...options,
-            headers: { ...(options.headers || {}), 'X-Faction-Token': FACTION_TOKEN },
-            onerror: options.onerror || (() => {}),
-            ontimeout: options.ontimeout || (() => {})
+            headers: {
+                ...(options.headers || {}),
+                'X-Faction-Token': FACTION_TOKEN
+            }
         });
     }
 
-    function parseJson(text) {
-        try { return JSON.parse(text); } catch (_) { return null; }
-    }
-
-    function getBattleHistorySummary(playerId) {
-        const apiKey = getApiKey();
+    function getBattleHistorySummary(playerId, apiKey) {
         if (!apiKey || !playerId) return Promise.resolve(null);
 
         return fetch(`https://api.torn.com/user/?selections=attacks&key=${encodeURIComponent(apiKey)}`, {
             cache: 'no-store'
         })
-            .then(response => response.ok ? response.json() : null)
-            .then(data => {
+            .then((response) => response.ok ? response.json() : null)
+            .then((data) => {
                 if (!data || data.error || !data.attacks) return null;
 
-                const attacks = Object.values(data.attacks).filter(entry => {
+                const attacks = Object.values(data.attacks).filter((entry) => {
                     if (!entry) return false;
                     const defenderId = Number(entry.defender_id || entry.defenderId || entry.target_id || entry.targetId || 0);
                     const attackerId = Number(entry.attacker_id || entry.attackerId || 0);
@@ -194,21 +245,9 @@
 
                 if (!attacks.length) return null;
 
-                const wins = attacks.filter(entry => {
-                    const result = String(entry.result || entry.outcome || entry.status || '');
-                    return /win|won|victory|success|killed|defeated/i.test(result);
-                }).length;
-
-                const losses = attacks.filter(entry => {
-                    const result = String(entry.result || entry.outcome || entry.status || '');
-                    return /loss|lost|failed|escaped|missed/i.test(result);
-                }).length;
-
-                const totalDamage = attacks.reduce((sum, entry) => {
-                    const val = Number(entry.damage || entry.damage_done || entry.damageDealt || 0);
-                    return sum + (Number.isFinite(val) ? val : 0);
-                }, 0);
-
+                const wins = attacks.filter((entry) => /win|won|victory|success|killed|defeated/i.test(String(entry.result || entry.outcome || entry.status || ''))).length;
+                const losses = attacks.filter((entry) => /loss|lost|failed|escaped|missed/i.test(String(entry.result || entry.outcome || entry.status || ''))).length;
+                const totalDamage = attacks.reduce((sum, entry) => sum + (Number(entry.damage || entry.damage_done || entry.damageDealt || 0) || 0), 0);
                 const latest = attacks.slice().sort((a, b) => (Number(b.timestamp || b.time || 0) || 0) - (Number(a.timestamp || a.time || 0) || 0))[0];
                 const latestResult = latest && (latest.result || latest.outcome || latest.status || 'Battle history');
                 const lastSeen = latest && (latest.timestamp || latest.time) ? new Date(Number(latest.timestamp || latest.time) * 1000).toLocaleString() : 'Unknown';
@@ -218,85 +257,98 @@
                     wins,
                     losses,
                     totalDamage,
-                    lastSeen,
-                    latestResult
+                    latestResult,
+                    lastSeen
                 };
             })
             .catch(() => null);
     }
 
-    function installProfileUi() {
-        const targetId = new URLSearchParams(window.location.search).get('XID');
-        ensureProfilePanel();
+    function isProfilePage() {
+        const href = window.location.href || '';
+        return /profiles\.php/i.test(href) || /\/profiles\.php/i.test(window.location.pathname || '');
+    }
 
-        if (!targetId) {
+    function isFactionPage() {
+        const href = window.location.href || '';
+        return /factions\.php/i.test(href) || /\/factions\.php/i.test(window.location.pathname || '');
+    }
+
+    function isAttackPage() {
+        const href = window.location.href || '';
+        return /loader\.php\?sid=attack/i.test(href) || /\/loader\.php\?sid=attack/i.test(href) || (new URLSearchParams(window.location.search || '')).get('sid') === 'attack';
+    }
+
+    function getProfileIdFromUrl() {
+        const qs = new URLSearchParams(window.location.search || '');
+        const direct = qs.get('XID') || qs.get('userID') || qs.get('id');
+        if (direct && /^\d+$/.test(String(direct))) return String(direct);
+
+        const hash = (window.location.hash || '').match(/[?&]XID=(\d+)/i);
+        if (hash && hash[1]) return hash[1];
+
+        const path = window.location.pathname || '';
+        const fromPath = path.match(/profiles\.php\/?(\d+)/i);
+        if (fromPath && fromPath[1]) return fromPath[1];
+
+        return null;
+    }
+
+    async function renderProfileFallback(targetId, apiKey) {
+        const fallback = apiKey ? await getBattleHistorySummary(targetId, apiKey) : null;
+
+        if (fallback) {
             writeProfileInfo(
-                'Could not determine profile ID.',
-                'The profile page can’t be matched to a player.',
-                'No player ID detected.',
-                'Torn profile is missing XID.'
+                `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`,
+                'No current logs available — using Torn attack history.',
+                `Last result: ${fallback.latestResult || 'No recent result captured.'}`,
+                fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.'
             );
             return;
         }
 
-        const query = new URLSearchParams({ id: targetId });
-        backendRequest({
+        writeProfileInfo(
+            'No combat intel available.',
+            'The panel remains visible, but there is no cached data yet.',
+            'No live loadout data.',
+            'Check the Torn API key or backend status.'
+        );
+    }
+
+    function installProfileUi() {
+        const id = getProfileIdFromUrl();
+        const apiKey = getApiKey();
+        ensureProfilePanel();
+
+        if (!id) {
+            writeProfileInfo(
+                'Could not determine profile ID.',
+                'The profile page is missing a valid XID.',
+                'No player ID detected.',
+                'Profile data cannot be resolved.'
+            );
+            return;
+        }
+
+        requestBackend({
             method: 'GET',
-            url: `${API_BASE}/stats?${query}`,
-            onload: async response => {
+            url: `${API_BASE}/stats?id=${encodeURIComponent(id)}`,
+            onload: async (response) => {
                 if (response.status < 200 || response.status >= 300) {
-                    const fallback = await getBattleHistorySummary(targetId);
-                    if (fallback) {
-                        writeProfileInfo(
-                            `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`,
-                            'No current logs available — using Torn attack history.',
-                            `Last result: ${fallback.latestResult || 'No recent result captured.'}`,
-                            fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.'
-                        );
-                        return;
-                    }
-                    writeProfileInfo(
-                        'Intel service unavailable.',
-                        'Panels remain visible while the backend is offline.',
-                        'No live loadout data.',
-                        'The service may be temporarily unavailable.'
-                    );
+                    await renderProfileFallback(id, apiKey);
                     return;
                 }
 
                 const data = parseJson(response.responseText);
                 if (!data) {
-                    const fallback = await getBattleHistorySummary(targetId);
-                    if (fallback) {
-                        writeProfileInfo(
-                            `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`,
-                            'No current logs available — using Torn attack history.',
-                            `Last result: ${fallback.latestResult || 'No recent result captured.'}`,
-                            fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.'
-                        );
-                        return;
-                    }
-                    writeProfileInfo(
-                        'Intel service returned unreadable data.',
-                        'Panels remain visible while data is missing.',
-                        'No valid loadout data.',
-                        'The backend may be unavailable.'
-                    );
+                    await renderProfileFallback(id, apiKey);
                     return;
                 }
 
                 const hasLiveStats = !!(Number(data.bss) || Number(data.str) || Number(data.def) || Number(data.spd) || Number(data.dex) || Number(data.samples));
                 if (!hasLiveStats) {
-                    const fallback = await getBattleHistorySummary(targetId);
-                    if (fallback) {
-                        writeProfileInfo(
-                            `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`,
-                            'No current logs available — using Torn attack history.',
-                            `Last result: ${fallback.latestResult || 'No recent result captured.'}`,
-                            fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.'
-                        );
-                        return;
-                    }
+                    await renderProfileFallback(id, apiKey);
+                    return;
                 }
 
                 const updated = data.updatedAt ? new Date(data.updatedAt * 1000).toLocaleDateString() : 'unknown';
@@ -308,22 +360,7 @@
                 );
             },
             onerror: async () => {
-                const fallback = await getBattleHistorySummary(targetId);
-                if (fallback) {
-                    writeProfileInfo(
-                        `Recent fights: ${fallback.count} · Wins ${fallback.wins} · Losses ${fallback.losses} · Damage ${formatNumber(fallback.totalDamage)}`,
-                        'Could not connect to intel service — using Torn attack history.',
-                        `Last result: ${fallback.latestResult || 'No recent result captured.'}`,
-                        fallback.lastSeen ? `Last seen: ${fallback.lastSeen}` : 'No historical battle records found.'
-                    );
-                    return;
-                }
-                writeProfileInfo(
-                    'Could not connect to intel service.',
-                    'Panels remain visible while the service is unavailable.',
-                    'No loadout data available.',
-                    'Check your API access or backend availability.'
-                );
+                await renderProfileFallback(id, apiKey);
             }
         });
     }
@@ -333,24 +370,15 @@
         if (!root) return;
 
         const observer = new MutationObserver(() => {
-            if (isProfilePage) ensureProfilePanel();
+            if (isProfilePage()) {
+                ensureProfilePanel();
+            }
         });
 
         observer.observe(root, { childList: true, subtree: true });
     }
 
-    if (isProfilePage) {
-        onDocumentReady(() => {
-            ensureProfilePanel();
-            installProfileObserver();
-            installProfileUi();
-            setInterval(() => {
-                ensureProfilePanel();
-            }, 2000);
-        });
-    }
-
-    if (isFactionPage) {
+    function installFactionUi() {
         const pendingIds = new Set();
         let timer = null;
 
@@ -368,23 +396,46 @@
         }
 
         function paintBadge(id, stats) {
-            document.querySelectorAll(`.fsl-roster-badge[data-fsl-id="${id}"]`).forEach(badge => {
+            document.querySelectorAll(`.fsl-roster-badge[data-fsl-id="${id}"]`).forEach((badge) => {
                 if (!stats || (!stats.bss && !stats.str && !stats.def && !stats.spd && !stats.dex)) {
                     badge.textContent = 'Faction Intel · no data';
                     badge.title = 'No faction intel report is available yet.';
                     return;
                 }
+
                 badge.textContent = `BSS ${formatNumber(stats.bss)} · ${archetype(stats)}`;
                 const gear = stats.loadout || {};
-                badge.title = `Faction Intel (${stats.samples || 1} reports)\nSTR ${formatNumber(stats.str)} | DEF ${formatNumber(stats.def)}\nSPD ${formatNumber(stats.spd)} | DEX ${formatNumber(stats.dex)}\nGear: ${[gear.primary, gear.melee, gear.temporary].filter(Boolean).join(', ') || 'Unknown'}`;
+                badge.title = `Faction Intel (${stats.samples || 1} reports)\nSTR ${formatNumber(stats.str)} | DEF ${formatNumber(stats.def)}\nSPD ${formatNumber(stats.spd)} | DEX ${formatNumber(stats.dex)}\nPrimary ${gear.primary || 'Unknown'} | Secondary ${gear.secondary || 'Unknown'}`;
             });
+        }
+
+        function fetchRosterStats(ids) {
+            for (let i = 0; i < ids.length; i += 50) {
+                const batch = ids.slice(i, i + 50);
+                requestBackend({
+                    method: 'POST',
+                    url: `${API_BASE}/stats-batch`,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({ ids: batch }),
+                    onload: (response) => {
+                        const map = response.status >= 200 && response.status < 300 ? parseJson(response.responseText) : null;
+                        batch.forEach((id) => paintBadge(id, map && map[id]));
+                    },
+                    onerror: () => batch.forEach((id) => paintBadge(id, null))
+                });
+            }
         }
 
         function scanRoster() {
             const newIds = [];
-            document.querySelectorAll('a[href*="profiles.php?XID="]').forEach(link => {
-                let id;
-                try { id = new URL(link.href, location.href).searchParams.get('XID'); } catch (_) { return; }
+            document.querySelectorAll('a[href*="profiles.php?XID="]').forEach((link) => {
+                let id = null;
+                try {
+                    id = new URL(link.href, location.href).searchParams.get('XID');
+                } catch (_) {
+                    return;
+                }
+
                 if (!id || !/^\d+$/.test(id)) return;
                 badgeFor(link, id);
                 if (!pendingIds.has(id)) {
@@ -392,38 +443,23 @@
                     newIds.push(id);
                 }
             });
+
             if (newIds.length) fetchRosterStats(newIds);
         }
 
-        function fetchRosterStats(ids) {
-            for (let index = 0; index < ids.length; index += 50) {
-                const batch = ids.slice(index, index + 50);
-                backendRequest({
-                    method: 'POST',
-                    url: `${API_BASE}/stats-batch`,
-                    headers: { 'Content-Type': 'application/json' },
-                    data: JSON.stringify({ ids: batch }),
-                    onload: response => {
-                        const map = response.status >= 200 && response.status < 300 ? parseJson(response.responseText) : null;
-                        batch.forEach(id => paintBadge(id, map && map[id]));
-                    },
-                    onerror: () => batch.forEach(id => paintBadge(id, null))
-                });
-            }
-        }
-
-        onDocumentReady(() => {
-            scanRoster();
-            const observer = new MutationObserver(() => {
-                clearTimeout(timer);
-                timer = setTimeout(scanRoster, 300);
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
+        scanRoster();
+        const observer = new MutationObserver(() => {
+            clearTimeout(timer);
+            timer = setTimeout(scanRoster, 250);
         });
+
+        const target = document.body || document.documentElement;
+        if (target) {
+            observer.observe(target, { childList: true, subtree: true });
+        }
     }
 
-    // Attack page: capture fight data and keep the script working without UI.
-    if (isAttackPage) {
+    function installAttackWatcher() {
         const state = {
             opponentId: null,
             opponentName: null,
@@ -442,13 +478,103 @@
         function captureLoadout(db) {
             const defender = db.defenderUser || {};
             const items = defender.items || defender.weapons || {};
-            ['primary', 'secondary', 'melee', 'temporary'].forEach(slot => {
+            ['primary', 'secondary', 'melee', 'temporary'].forEach((slot) => {
                 if (items[slot] && items[slot].name) state.loadout[slot] = items[slot].name;
             });
+
             if (Array.isArray(defender.armor)) {
-                state.loadout.armor = defender.armor.map(item => item && (item.name || item)).filter(Boolean);
+                state.loadout.armor = defender.armor.map((item) => item && (item.name || item)).filter(Boolean);
             } else if (defender.armor && typeof defender.armor === 'object') {
-                state.loadout.armor = Object.values(defender.armor).map(item => item && item.name).filter(Boolean);
+                state.loadout.armor = Object.values(defender.armor).map((item) => item && item.name).filter(Boolean);
+            }
+        }
+
+        function parseAttackPayload(payload) {
+            const db = payload && payload.DB;
+            if (!db || state.submitted) return;
+
+            if (db.defenderUser) {
+                state.opponentId = Number(db.defenderUser.playerId) || null;
+                state.opponentName = db.defenderUser.playername || null;
+                captureLoadout(db);
+            }
+
+            (Array.isArray(db.fightLogs) ? db.fightLogs : []).forEach((entry, index) => {
+                if (!entry || !entry.attackerId || !state.opponentId) return;
+                const key = entry.logId || entry.id || `${entry.attackerId}:${entry.action}:${entry.weaponName || ''}:${entry.damage || ''}:${index}`;
+                if (state.seenLogEntries.has(key)) return;
+                state.seenLogEntries.add(key);
+
+                const isOpponent = Number(entry.attackerId) === state.opponentId;
+                if (isOpponent && entry.weaponName) {
+                    const slot = { Primary: 'primary', Secondary: 'secondary', Melee: 'melee', Temporary: 'temporary' }[entry.weaponType];
+                    if (slot) state.loadout[slot] = entry.weaponName;
+                }
+
+                if (entry.smoke || entry.tearGas || entry.flash) return;
+                const hits = entry.action === 'hit' || entry.action === 'crit';
+                if (!hits && entry.action !== 'miss') return;
+
+                if (isOpponent) {
+                    state.opponentSwings += 1;
+                    if (hits) state.opponentHits += 1;
+                    if (hits && Number(entry.damage) > 0) state.opponentDamage.push(Number(entry.damage));
+                } else {
+                    state.mySwings += 1;
+                    if (hits) state.myHits += 1;
+                    if (hits && Number(entry.damage) > 0) state.myDamage.push(Number(entry.damage));
+                }
+            });
+
+            const fairFight = Number(db.currentFight && db.currentFight.modifiers && db.currentFight.modifiers.fairFight);
+            if (Number.isFinite(fairFight) && fairFight >= 1) {
+                state.fairFight = fairFight;
+                state.submitted = true;
+                uploadReport();
+            }
+        }
+
+        async function uploadReport() {
+            try {
+                const key = getApiKey();
+                if (!key || !state.opponentId) return;
+
+                const response = await fetch(`https://api.torn.com/user/?selections=basic,battlestats&key=${encodeURIComponent(key)}`);
+                const data = await response.json();
+                if (!response.ok || data.error || !Number.isFinite(Number(data.strength))) return;
+
+                const myBss = ['strength', 'defense', 'speed', 'dexterity'].reduce((sum, keyName) => sum + Math.sqrt(Number(data[keyName]) || 0), 0);
+                const estimatedBss = state.fairFight > 1 && state.fairFight < 3 ? (3 / 8) * (state.fairFight - 1) * myBss : null;
+                const estimatedDef = estimateDefense(Number(data.strength), state.myDamage);
+                const estimatedDex = estimateDexterity(Number(data.speed), state.mySwings, state.myHits);
+                const estimatedSpd = estimateSpeed(Number(data.dexterity), state.opponentSwings, state.opponentHits);
+                const estimatedStr = estimateStrength(state.opponentDamage);
+
+                const report = {
+                    targetId: state.opponentId,
+                    targetName: state.opponentName,
+                    reporterId: data.player_id,
+                    factionId: (data.faction && data.faction.faction_id) || 0,
+                    fairFight: state.fairFight,
+                    estimatedBss: estimatedBss ? Math.round(estimatedBss) : null,
+                    estimatedStr: estimatedStr ? Math.round(estimatedStr) : null,
+                    estimatedDef: estimatedDef ? Math.round(estimatedDef) : null,
+                    estimatedSpd: estimatedSpd ? Math.round(estimatedSpd) : null,
+                    estimatedDex: estimatedDex ? Math.round(estimatedDex) : null,
+                    remainingStrSpdBss: estimatedBss && estimatedDef && estimatedDex ? Math.max(0, Math.round(estimatedBss - Math.sqrt(estimatedDef) - Math.sqrt(estimatedDex))) : null,
+                    loadout: state.loadout,
+                    sampleCounts: { mySwings: state.mySwings, oppSwings: state.opponentSwings },
+                    timestamp: Math.floor(Date.now() / 1000)
+                };
+
+                requestBackend({
+                    method: 'POST',
+                    url: `${API_BASE}/log`,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify(report)
+                });
+            } catch (error) {
+                console.warn('[FSL] Report upload failed:', error);
             }
         }
 
@@ -485,93 +611,38 @@
             return 10 * 10 ** Math.max(logStrength, 0);
         }
 
-        async function uploadReport() {
-            try {
-                const apiKey = getApiKey();
-                if (!apiKey || !state.opponentId) return;
-                const response = await fetch(`https://api.torn.com/user/?selections=basic,battlestats&key=${encodeURIComponent(apiKey)}`);
-                const data = await response.json();
-                if (!response.ok || data.error || !Number.isFinite(Number(data.strength))) return;
-
-                const myBss = ['strength', 'defense', 'speed', 'dexterity'].reduce((sum, key) => sum + Math.sqrt(Number(data[key]) || 0), 0);
-                const estimatedBss = state.fairFight > 1 && state.fairFight < 3 ? (3 / 8) * (state.fairFight - 1) * myBss : null;
-                const estimatedDef = estimateDefense(Number(data.strength), state.myDamage);
-                const estimatedDex = estimateDexterity(Number(data.speed), state.mySwings, state.myHits);
-                const estimatedSpd = estimateSpeed(Number(data.dexterity), state.opponentSwings, state.opponentHits);
-                const estimatedStr = estimateStrength(state.opponentDamage);
-                const report = {
-                    targetId: state.opponentId,
-                    targetName: state.opponentName,
-                    reporterId: data.player_id,
-                    factionId: data.faction && data.faction.faction_id || 0,
-                    fairFight: state.fairFight,
-                    estimatedBss: estimatedBss ? Math.round(estimatedBss) : null,
-                    estimatedStr: estimatedStr ? Math.round(estimatedStr) : null,
-                    estimatedDef: estimatedDef ? Math.round(estimatedDef) : null,
-                    estimatedSpd: estimatedSpd ? Math.round(estimatedSpd) : null,
-                    estimatedDex: estimatedDex ? Math.round(estimatedDex) : null,
-                    remainingStrSpdBss: estimatedBss && estimatedDef && estimatedDex ? Math.max(0, Math.round(estimatedBss - Math.sqrt(estimatedDef) - Math.sqrt(estimatedDex))) : null,
-                    loadout: state.loadout,
-                    sampleCounts: { mySwings: state.mySwings, oppSwings: state.opponentSwings },
-                    timestamp: Math.floor(Date.now() / 1000)
-                };
-                backendRequest({ method: 'POST', url: `${API_BASE}/log`, headers: { 'Content-Type': 'application/json' }, data: JSON.stringify(report) });
-            } catch (error) {
-                console.warn('[FSL] Report upload failed:', error);
-            }
-        }
-
-        function parseAttackPayload(payload) {
-            const db = payload && payload.DB;
-            if (!db || state.submitted) return;
-            if (db.defenderUser) {
-                state.opponentId = Number(db.defenderUser.playerId) || null;
-                state.opponentName = db.defenderUser.playername || null;
-                captureLoadout(db);
-            }
-            (Array.isArray(db.fightLogs) ? db.fightLogs : []).forEach((entry, index) => {
-                if (!entry || !entry.attackerId || !state.opponentId) return;
-                const key = entry.logId || entry.id || `${entry.attackerId}:${entry.action}:${entry.weaponName || ''}:${entry.damage || ''}:${index}`;
-                if (state.seenLogEntries.has(key)) return;
-                state.seenLogEntries.add(key);
-                const isOpponent = Number(entry.attackerId) === state.opponentId;
-                if (isOpponent && entry.weaponName) {
-                    const slot = { Primary: 'primary', Secondary: 'secondary', Melee: 'melee', Temporary: 'temporary' }[entry.weaponType];
-                    if (slot) state.loadout[slot] = entry.weaponName;
-                }
-                if (entry.smoke || entry.tearGas || entry.flash) return;
-                const hits = entry.action === 'hit' || entry.action === 'crit';
-                if (!hits && entry.action !== 'miss') return;
-                if (isOpponent) {
-                    state.opponentSwings++;
-                    if (hits) state.opponentHits++;
-                    if (hits && Number(entry.damage) > 0) state.opponentDamage.push(Number(entry.damage));
-                } else {
-                    state.mySwings++;
-                    if (hits) state.myHits++;
-                    if (hits && Number(entry.damage) > 0) state.myDamage.push(Number(entry.damage));
-                }
-            });
-            const fairFight = Number(db.currentFight && db.currentFight.modifiers && db.currentFight.modifiers.fairFight);
-            if (Number.isFinite(fairFight) && fairFight >= 1) {
-                state.fairFight = fairFight;
-                state.submitted = true;
-                uploadReport();
-            }
-        }
-
-        const originalFetch = window.fetch;
+        const originalFetch = window.fetch.bind(window);
         window.fetch = async function (...args) {
-            const response = await originalFetch.apply(this, args);
+            const response = await originalFetch(...args);
             try {
-                const requestUrl = typeof args[0] === 'string' ? args[0] : args[0] && args[0].url || '';
+                const requestUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
                 if (requestUrl.includes('sid=attackData')) {
                     response.clone().json().then(parseAttackPayload).catch(() => {});
                 }
-            } catch (_) {
-                // Do not interfere with Torn's request.
-            }
+            } catch (_) {}
             return response;
         };
+    }
+
+    function installUi() {
+        ensureProfilePanel();
+        if (isProfilePage()) {
+            installProfileUi();
+            installProfileObserver();
+        }
+
+        if (isFactionPage()) {
+            installFactionUi();
+        }
+
+        if (isAttackPage()) {
+            installAttackWatcher();
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', installUi, { once: true });
+    } else {
+        installUi();
     }
 })();
