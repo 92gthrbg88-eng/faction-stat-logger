@@ -4,17 +4,17 @@
 // @version      1.3.0
 // @description  Passively logs 4-stat combat estimates and defender equipment loadouts from fights, displaying them on Player Profiles and Faction War screens without interfering with FFScouter or CAT Script.
 // @author       92gthrbg88-eng
-// @match        https://torn.com*
-// @match        https://torn.com*
-// @match        https://torn.com*
+// @match        https://www.torn.com/leader.php?side=attack*
+// @match        https://www.torn.com/profiles.php*
+// @match        https://www.torn.com/factions.php*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
-// @connect      ://torn.com
+// @connect      api.torn.com
 // @connect      faction-intel.thn25tvjtb.workers.dev
-// @updateURL    https://github.com/92gthrbg88-eng/faction-stat-logger.user.js
-// @downloadURL  https://github.com/92gthrbg88-eng/faction-stat-logger.user.js
+// @updateURL    https://github.com/92gthrbg88-eng/faction-stat-logger.user.js/main/faction-stat-logger.user.js
+// @downloadURL  https://github.com/92gthrbg88-eng/faction-stat-logger.user.js/main/faction-stat-logger.user.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -24,7 +24,7 @@
     // =========================================================================
     // CONFIGURATION
     // =========================================================================
-    const SERVERLESS_BASE_URL = 'faction-intel.thn25tvjtb.workers.dev';
+    const SERVERLESS_BASE_URL = 'https://faction-intel.thn25tvjtb.workers.dev';
     const FACTION_SECRET_TOKEN = 'HeartBreakers2026!SecretKey';
 
     const PAGE_URL = window.location.href;
@@ -235,7 +235,7 @@ async function finalizeAndUpload() {
 try {
 const apiKey = getApiKey();
 if (!apiKey || !fightState.opponentId) return;
-const res = await fetch(https://torn.com{encodeURIComponent(apiKey)});
+const res = await fetch('https://api.torn.com/user/?selections=basic,battlestats&key=${encodeURIComponent(apiKey)}');
 const data = await res.json();
 if (data.error) return;
 const myBss = Math.sqrt(data.strength) + Math.sqrt(data.defense) + Math.sqrt(data.speed) + Math.sqrt(data.dexterity);
