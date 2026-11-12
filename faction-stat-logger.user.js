@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faction Fight Stat Logger & Loadout Intel
 // @namespace    https://github.com
-// @version      1.3.3
+// @version      1.3.4
 // @description  Logs combat estimates and defender equipment loadouts; keeps profile panels visible and falls back to Torn attack history when live logs are unavailable.
 // @author       92gthrbg88-eng
 // @match        https://www.torn.com/loader.php?sid=attack*
@@ -25,8 +25,8 @@
     const FACTION_TOKEN = 'HeartBreakers2026!SecretKey';
     const pageUrl = new URL(window.location.href);
     const isAttackPage = pageUrl.searchParams.get('sid') === 'attack';
-    const isProfilePage = pageUrl.pathname.endsWith('/profiles.php');
-    const isFactionPage = pageUrl.pathname.endsWith('/factions.php');
+    const isProfilePage = /profiles\.php/i.test(pageUrl.href) || /profiles\.php/i.test(pageUrl.pathname);
+    const isFactionPage = /factions\.php/i.test(pageUrl.href) || /factions\.php/i.test(pageUrl.pathname);
 
     function getApiKey() {
         let key = String(GM_getValue('torn_api_key', '') || '').trim();
@@ -74,15 +74,6 @@
             }
         `;
         (document.head || document.documentElement).appendChild(style);
-    }
-
-    function findProfileHost() {
-        const selectors = ['.profile-wrapper', '.profile-container', '.profile-content', '#profile-content', '.user-profile', 'main', 'body'];
-        for (const selector of selectors) {
-            const host = document.querySelector(selector);
-            if (host) return host;
-        }
-        return document.body || document.documentElement;
     }
 
     function onDocumentReady(callback) {
@@ -153,13 +144,13 @@
         }).catch(() => null);
     }
 
-    if (isProfilePage) {
-        onDocumentReady(() => {
-            addStyles();
-            const targetId = pageUrl.searchParams.get('XID');
-            const host = findProfileHost();
+    function ensureProfilePanels() {
+        const host = document.querySelector('.profile-wrapper, .profile-container, .profile-content, .user-profile, .profile-page, main, #main, body') || document.body;
+        if (!host) return;
 
-            const statsPanel = document.createElement('section');
+        let statsPanel = document.getElementById('fsl-profile-card');
+        if (!statsPanel) {
+            statsPanel = document.createElement('section');
             statsPanel.className = 'fsl-panel';
             statsPanel.id = 'fsl-profile-card';
             const statsTitle = document.createElement('h3');
@@ -170,8 +161,14 @@
             statsNote.className = 'fsl-muted';
             statsNote.textContent = 'Intel will appear here when the service has data.';
             statsPanel.append(statsTitle, statsText, statsNote);
+            const insertBeforeNode = host.firstChild;
+            if (insertBeforeNode) host.insertBefore(statsPanel, insertBeforeNode);
+            else host.appendChild(statsPanel);
+        }
 
-            const gearPanel = document.createElement('section');
+        let gearPanel = document.getElementById('fsl-loadout-card');
+        if (!gearPanel) {
+            gearPanel = document.createElement('section');
             gearPanel.className = 'fsl-panel fsl-loadout';
             gearPanel.id = 'fsl-loadout-card';
             const gearTitle = document.createElement('h3');
@@ -182,15 +179,31 @@
             gearNote.className = 'fsl-muted';
             gearNote.textContent = 'Loadout data will appear here when available.';
             gearPanel.append(gearTitle, gearText, gearNote);
+            const insertBeforeNode = host.firstChild;
+            if (insertBeforeNode) host.insertBefore(gearPanel, insertBeforeNode);
+            else host.appendChild(gearPanel);
+        }
+    }
 
-            const insertBeforeHost = host.firstChild;
-            if (insertBeforeHost) {
-                host.insertBefore(gearPanel, insertBeforeHost);
-                host.insertBefore(statsPanel, insertBeforeHost);
-            } else {
-                host.appendChild(statsPanel);
-                host.appendChild(gearPanel);
+    if (isProfilePage) {
+        function loadProfileIntel() {
+            addStyles();
+            ensureProfilePanels();
+
+            const targetId = pageUrl.searchParams.get('XID') || new URLSearchParams(window.location.search).get('XID');
+            const statsPanel = document.getElementById('fsl-profile-card');
+            const gearPanel = document.getElementById('fsl-loadout-card');
+            if (!statsPanel || !gearPanel) {
+                ensureProfilePanels();
+                return;
             }
+
+            const statsText = statsPanel.querySelector('p');
+            const statsNote = statsPanel.querySelector('.fsl-muted');
+            const gearText = gearPanel.querySelectorAll('p')[1];
+            const gearNote = gearPanel.querySelectorAll('.fsl-muted')[0];
+
+            if (!statsText || !statsNote || !gearText || !gearNote) return;
 
             if (!targetId) {
                 statsNote.textContent = 'Could not determine this profile’s player ID.';
@@ -260,6 +273,18 @@
                     statsNote.textContent = 'Could not connect to intel service; panels remain visible.';
                 }
             });
+        }
+
+        onDocumentReady(() => {
+            loadProfileIntel();
+            const observer = new MutationObserver(() => {
+                ensureProfilePanels();
+                loadProfileIntel();
+            });
+            observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+            setInterval(() => {
+                ensureProfilePanels();
+            }, 2000);
         });
     }
 
