@@ -13,8 +13,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      ://torn.com
 // @connect      faction-intel.thn25tvjtb.workers.dev
-// @updateURL    https://githubusercontent.com
-// @downloadURL  https://githubusercontent.com
+// @updateURL    https://github.com/92gthrbg88-eng/faction-stat-logger.user.js
+// @downloadURL  https://github.com/92gthrbg88-eng/faction-stat-logger.user.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -24,7 +24,7 @@
     // =========================================================================
     // CONFIGURATION
     // =========================================================================
-    const SERVERLESS_BASE_URL = 'https://workers.dev';
+    const SERVERLESS_BASE_URL = 'faction-intel.thn25tvjtb.workers.dev';
     const FACTION_SECRET_TOKEN = 'HeartBreakers2026!SecretKey';
 
     const PAGE_URL = window.location.href;
