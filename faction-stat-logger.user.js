@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Faction Fight Stat Logger & Loadout Intel
 // @namespace    https://github.com
-// @version      1.3.4
+// @version      1.3.5
 // @description  Logs combat estimates and defender equipment loadouts; keeps profile panels visible and falls back to Torn attack history when live logs are unavailable.
 // @author       92gthrbg88-eng
 // @match        https://www.torn.com/loader.php?sid=attack*
@@ -27,14 +27,32 @@
     const isAttackPage = pageUrl.searchParams.get('sid') === 'attack';
     const isProfilePage = /profiles\.php/i.test(pageUrl.href) || /profiles\.php/i.test(pageUrl.pathname);
     const isFactionPage = /factions\.php/i.test(pageUrl.href) || /factions\.php/i.test(pageUrl.pathname);
+    let apiKeyCache = null;
 
-    function getApiKey() {
+    function getApiKey(forcePrompt = false) {
+        if (!forcePrompt && apiKeyCache) return apiKeyCache;
+
         let key = String(GM_getValue('torn_api_key', '') || '').trim();
-        if (!key) {
-            key = String(prompt('Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):') || '').trim();
-            if (key) GM_setValue('torn_api_key', key);
+        if (!key || forcePrompt) {
+            const promptText = 'Faction Stat Logger: Enter your Torn Limited Access API Key (stored locally only):';
+            try {
+                key = String(prompt(promptText) || '').trim();
+            } catch (_) {
+                if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+                    key = String(window.prompt ? window.prompt(promptText) : '' || '').trim();
+                }
+            }
+            if (key) {
+                GM_setValue('torn_api_key', key);
+                apiKeyCache = key;
+            } else {
+                apiKeyCache = '';
+            }
+        } else {
+            apiKeyCache = key;
         }
-        return key;
+
+        return apiKeyCache;
     }
 
     function formatNumber(value) {
@@ -204,6 +222,18 @@
             const gearNote = gearPanel.querySelectorAll('.fsl-muted')[0];
 
             if (!statsText || !statsNote || !gearText || !gearNote) return;
+
+            const apiKey = getApiKey();
+            if (!apiKey) {
+                statsText.textContent = 'API key required for Torn battle-history fallback.';
+                statsNote.textContent = 'Enter the key when prompted to enable profile intel.';
+                gearText.textContent = 'No key entered yet.';
+                gearNote.textContent = 'The script will ask once on the next load.';
+                try {
+                    getApiKey(true);
+                } catch (_) {}
+                return;
+            }
 
             if (!targetId) {
                 statsNote.textContent = 'Could not determine this profile’s player ID.';
