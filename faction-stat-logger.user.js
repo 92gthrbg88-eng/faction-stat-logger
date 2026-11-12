@@ -4,7 +4,7 @@
 // @version      1.3.0
 // @description  Passively logs 4-stat combat estimates and defender equipment loadouts from fights, displaying them on Player Profiles and Faction War screens without interfering with FFScouter or CAT Script.
 // @author       92gthrbg88-eng
-// @match        https://www.torn.com/loader.php?side=attack*
+// @match        https://www.torn.com/loader.php?sid=attack*
 // @match        https://www.torn.com/profiles.php*
 // @match        https://www.torn.com/factions.php*
 // @grant        GM_getValue
